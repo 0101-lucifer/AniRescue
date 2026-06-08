@@ -1,16 +1,16 @@
 import { useState } from 'react';
 import useLocation from '../hooks/useLocation';
+import useOfflineSync from '../hooks/useOfflineSync';
 
 export default function ReportCase() {
   const [description, setDescription] = useState('');
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
-  
-  // New states for our simulated submission
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [aiResult, setAiResult] = useState(null);
   
   const { location, error, isLoading, getLocation } = useLocation();
+  const { isOffline, pendingQueue, saveForOfflineSync } = useOfflineSync();
 
   const handleImageChange = (e) => {
     const file = e.target.files[0];
@@ -20,11 +20,9 @@ export default function ReportCase() {
     }
   };
 
-  // The simulated API call to Gemini
   const handleSubmit = (e) => {
     e.preventDefault();
     
-    // Basic validation
     if (!imageFile || !location) {
       alert("⚠️ Please provide both a photo and your location to proceed.");
       return;
@@ -32,7 +30,43 @@ export default function ReportCase() {
 
     setIsSubmitting(true);
 
-    // Simulate a 3-second delay for the Gemini Vision API
+    // --- OFFLINE LOGIC ---
+    if (isOffline) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        try {
+          // Attempt to save to localStorage
+          saveForOfflineSync({
+            location,
+            description,
+            imageBase64: reader.result 
+          });
+          
+          setIsSubmitting(false);
+          alert("📴 You are offline. Your report has been saved securely and will automatically send when you reconnect!");
+          
+          // Reset form on success
+          setImagePreview(null); 
+          setImageFile(null); 
+          setDescription('');
+          
+        } catch (error) {
+          console.error("Offline save error:", error);
+          setIsSubmitting(false); // Un-stick the button!
+          
+          // Check if the error is the 5MB storage limit
+          if (error.name === 'QuotaExceededError' || error.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
+            alert("⚠️ This high-res image is too large to save offline. Please take a lower resolution photo or wait for internet access.");
+          } else {
+            alert("⚠️ Failed to save report offline. Please try again.");
+          }
+        }
+      };
+      reader.readAsDataURL(imageFile);
+      return; // Stop here, do not run the AI simulation if offline
+    }
+
+    // --- ONLINE LOGIC (Simulated Gemini AI) ---
     setTimeout(() => {
       setIsSubmitting(false);
       setAiResult({
@@ -97,6 +131,25 @@ export default function ReportCase() {
           <p className="text-gray-600 mb-6 text-sm">
             Please provide a photo and location. Our AI will analyze the situation instantly.
           </p>
+
+          {/* Offline Warning Banner */}
+          {isOffline && (
+            <div className="bg-yellow-50 border-l-4 border-yellow-500 p-4 mb-6 rounded-r-lg">
+              <p className="text-sm text-yellow-800 font-bold flex items-center gap-2">
+                <span>📴</span> You are currently offline.
+              </p>
+              <p className="text-xs text-yellow-700 mt-1">
+                Reports submitted now will be saved to your device and synced automatically when your connection is restored.
+              </p>
+            </div>
+          )}
+          
+          {/* Pending Sync Indicator */}
+          {pendingQueue > 0 && !isOffline && (
+            <p className="text-xs text-emerald-600 font-bold mb-4">
+              ⏳ Syncing {pendingQueue} offline report(s) in the background...
+            </p>
+          )}
 
           <form className="space-y-5" onSubmit={handleSubmit}>
             
@@ -174,7 +227,7 @@ export default function ReportCase() {
             >
               {isSubmitting ? (
                 <>
-                  <span className="animate-spin text-xl">⏳</span> Processing AI...
+                  <span className="animate-spin text-xl">⏳</span> Processing...
                 </>
               ) : (
                 'Send Rescue Alert'
